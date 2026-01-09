@@ -1,0 +1,1943 @@
+---
+title: "A Statistical Approach to Predicting Emphysema Percentage"
+subtitle: "Connecting Performance with Contract Value"
+author: "Benjamin De La Torre Martinez"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    # keep default other options
+fontsize: 11pt
+geometry: "margin=1in, paperwidth=8.5in, paperheight=11in"
+header-includes:
+  - \usepackage{float}     % allows [H] figure placement
+---
+
+\begin{center}
+STAT 610\\
+Fall 2025\\
+2020-12-08
+\end{center}
+
+## Executive Summary  
+
+Emphysema is a progressive lung disease that damages alveoli (microscopic air sacs fundamental to the respiratory system). While the precise figure is uncertain, an estimated 1.6% of adults had a diagnosis of emphysema. This study thus attempts to identify the set of combined factors that are most strongly associated with the percentage of emphysema an indiviual has in their lungs. After completing analysis through linear regression we can observe that the variables that are most correlation with percentage of emphysema are those related to the health of one's respiratory system. More specifically prior diagnoses of copd and emphysema. Additionally, the health related metrics included in our model, such as smoking status, average cigarettes smoked per day, smoking duration, functional residual capacity, inspiratory and expiratory mean attenuation, gas trapping percentage, the FEV1/FVC ratio, and FVC, all contribute meaningful information about a patient's respiratory condition. These variables capture both physiological function and exposure-related effects, helping to further explain variation in emphysema percentage beyond prior diagnoses alone. Or in other words, the worse an individual's respiratory health is, the higher the percentage of emphysema tends to be.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.pos = "H")
+
+library(car)
+library(ggplot2)
+library(GGally)
+library(mice)
+library(ggmice)
+library(reshape2)
+library(leaps)
+library(olsrr)
+library(multcomp)
+library(lmtest)
+library(glmnet)
+library(dplyr)
+library(tidyverse)
+library(skimr)
+library(tinytex)
+library(VIM)
+library(naniar)
+library(patchwork)
+library(gridExtra)
+library(data.table)
+library(pander)
+library(kableExtra)
+library(ggfortify)
+library(patchwork)
+library(broom)
+
+```
+
+```{r preprocess, include = FALSE, eval = TRUE}
+# Load Data
+df_copd = read_csv( "C:/Users/delat/OneDrive/Desktop/R programming/copd_data.csv" )
+
+
+# Replace -1's with NA's
+df_copd = df_copd |>
+  mutate( sysBP = ifelse( sysBP < 0, NA, sysBP ),
+          diasBP = ifelse( diasBP < 0, NA, diasBP ), 
+          hr = ifelse( hr < 0, NA, hr ), 
+          hay_fever = case_when(
+            hay_fever == 0 ~ "No",
+            hay_fever == 1 ~ "Yes",
+            hay_fever == 3 ~ "unknown"
+          ),
+          SmokStartAge = ifelse( SmokStartAge == -1 , NA, SmokStartAge),
+          CigPerDaySmokAvg = ifelse( CigPerDaySmokAvg == -1, NA, CigPerDaySmokAvg),
+          Duration_Smoking = ifelse( Duration_Smoking == -1, NA, Duration_Smoking),
+          total_lung_capacity = ifelse( total_lung_capacity == -1 , NA, total_lung_capacity),
+          pct_emphysema = ifelse( pct_emphysema == -1 , NA, pct_emphysema),
+          functional_residual_capacity = ifelse( functional_residual_capacity == -1 , NA, functional_residual_capacity),
+          pct_gastrapping = ifelse( pct_gastrapping == -1 , NA, pct_gastrapping),
+          insp_meanatt = ifelse( insp_meanatt == -1, NA, insp_meanatt),
+          exp_meanatt = ifelse( exp_meanatt == -1, NA, exp_meanatt),
+          FEV1_FVC_ratio = ifelse( FEV1_FVC_ratio == -1, NA, FEV1_FVC_ratio),
+          FEV1 = ifelse( FEV1 == -1, NA, FEV1),
+          FVC = ifelse( FVC == -1, NA, FVC))
+
+
+# Convert categorical unknown to NA's  
+df_copd = df_copd |> mutate(
+  asthma = ifelse( asthma == "unknown", NA, asthma),
+  hay_fever = ifelse( hay_fever == "unknown", NA, hay_fever),
+  bronchitis_attack = ifelse( bronchitis_attack == "unknown", NA, bronchitis_attack),
+  pneumonia = ifelse( pneumonia == "unknown", NA, pneumonia),
+  chronic_bronchitis = ifelse( chronic_bronchitis == "unknown", NA, chronic_bronchitis),
+  emphysema = ifelse( emphysema == "unknown", NA, emphysema),
+  copd = ifelse( copd == "unknown", NA, copd),
+  sleep_apnea = ifelse( (sleep_apnea == "unknown") | (sleep_apnea == "missing") , NA, sleep_apnea)
+)
+
+
+# Convert categorical to binary  
+df_copd <- df_copd |> 
+  mutate(
+    asthma = case_when(
+      is.na(asthma) ~ NA_real_,
+      asthma == "No" ~ 0,
+      asthma == "Yes" ~ 1
+    ),
+    hay_fever = case_when(
+      is.na(hay_fever) ~ NA_real_,
+      hay_fever == "No" ~ 0,
+      hay_fever == "Yes" ~ 1
+    ),
+    bronchitis_attack = case_when(
+      is.na(bronchitis_attack) ~ NA_real_,
+      bronchitis_attack == "No" ~ 0,
+      bronchitis_attack == "Yes" ~ 1
+    ),
+    pneumonia = case_when(
+      is.na(pneumonia) ~ NA_real_,
+      pneumonia == "No" ~ 0,
+      pneumonia == "Yes" ~ 1
+    ),
+    chronic_bronchitis = case_when(
+      is.na(chronic_bronchitis) ~ NA_real_,
+      chronic_bronchitis == "No" ~ 0,
+      chronic_bronchitis == "Yes" ~ 1
+    ),
+    emphysema = case_when(
+      is.na(emphysema) ~ NA_real_,
+      emphysema == "No" ~ 0,
+      emphysema == "Yes" ~ 1
+    ),
+    copd = case_when(
+      is.na(copd) ~ NA_real_,
+      copd == "No" ~ 0,
+      copd == "Yes" ~ 1
+    ),
+    sleep_apnea = case_when(
+      is.na(sleep_apnea) ~ NA_real_,
+      sleep_apnea == "No" ~ 0,
+      sleep_apnea == "Yes" ~ 1
+    )
+  )
+
+
+# Convert into factors  
+df_copd = df_copd |>
+  mutate( gender = as.factor(gender),
+          race = as.factor(race),
+          asthma = as.factor(asthma),
+          hay_fever = as.factor(hay_fever),
+          bronchitis_attack = as.factor(bronchitis_attack),
+          pneumonia = as.factor(pneumonia),
+          chronic_bronchitis = as.factor(chronic_bronchitis),
+          emphysema = as.factor(emphysema),
+          copd = as.factor(copd),
+          sleep_apnea = as.factor(sleep_apnea),
+          smoking_status = as.factor(smoking_status),
+          gender = as.factor(gender) )
+
+# Relocate percent of emphysema
+df_copd = df_copd |>
+  relocate( pct_emphysema, .after = sid )
+
+# Zeros for smoake age and CigPerDaySmokAvg
+df_copd <- df_copd |>
+  mutate(
+    SmokStartAge = if_else(smoking_status == "Never smoked", 0, SmokStartAge),
+    CigPerDaySmokAvg = if_else(smoking_status == "Never smoked", 0, CigPerDaySmokAvg),
+    Duration_Smoking = if_else(smoking_status == "Never smoked", 0, Duration_Smoking)
+  )
+
+# Copd data
+copd = df_copd |>
+  dplyr::select( -sid, -visit_year, -visit_date )
+
+
+# Download imputed data
+complete = read_csv("C:/Users/delat/OneDrive/Desktop/R programming/complete.csv")
+complete = complete |> select( -c("...1" ) ) |>
+  mutate( asthma = as.factor(asthma),
+          hay_fever = as.factor(hay_fever),
+          bronchitis_attack = as.factor(bronchitis_attack),
+          pneumonia = as.factor(pneumonia),
+          chronic_bronchitis = as.factor(chronic_bronchitis),
+          emphysema = as.factor(emphysema),
+          copd = as.factor(copd),
+          sleep_apnea = as.factor(sleep_apnea),
+          difference = FEV1_phase2 - FEV1)
+  
+imputed = read_csv("C:/Users/delat/OneDrive/Desktop/R programming/imputed.csv") |>
+    mutate( asthma = as.factor(asthma),
+          hay_fever = as.factor(hay_fever),
+          bronchitis_attack = as.factor(bronchitis_attack),
+          pneumonia = as.factor(pneumonia),
+          chronic_bronchitis = as.factor(chronic_bronchitis),
+          emphysema = as.factor(emphysema),
+          copd = as.factor(copd),
+          sleep_apnea = as.factor(sleep_apnea),
+          difference = FEV1_phase2 - FEV1)
+
+```
+
+```{r modifyDataAccodinggly, include = FALSE, eval = TRUE}
+# 0's instead of NA and FACTORS
+
+# add patient unique ID's
+```
+
+
+\newpage
+
+## Introduction  
+
+Most sources identify smoking and long-term exposure to second-hand smoke as the leading causes of emphysema. Rather than proving causation, this study focuses on a related question: Which variables show a significant correlation with emphysema percentage? To investigate this, we examine several indicators of general health (BMI, heart rate, blood pressure) and respiratory health. Our hypothesis is that emphysema severity is associated with negative respiratory conditions (such as COPD and prior emphysema diagnoses), smoking quantity and duration, and lung-function metrics, though the specific contributions of each remain uncertain.
+We apply multivariate linear regression to predict continuous emphysema percentages (0–100%) using both continuous and categorical variables. This method is appropriate for our data structure, and diagnostic checks will confirm whether its assumptions are satisfied. While other analytical approaches exist, linear regression is chosen for its interpretability and its ability to highlight clear relationships between predictors and emphysema percentage. Although regression assumes mainly additive effects—a limitation given the complexity of respiratory interactions—we prioritize interpretability over predictive accuracy, making regression a justified choice for this analysis.
+
+## Exploratory Data Analysis  
+
+Our study begins by examining our data. By doing so, we get to understand the structure, distribution, range and patterns of out data. Ensuring that our analysis is consistent and account for the variability of our data.
+
+### A. Summary of our Data  
+Our dataset contains measurements of 5747 different individuals containing 35 predictors. One disclaimer about our data is that our study seems to be highly biased as subjects are either Caucasian or African American.  
+
+```{r skim, echo = FALSE}
+sumario = df_copd |> skim()
+summary(sumario)
+
+```
+
+Based on the distributional profiles of all variables, no anomalies are evident. The variables exhibit mild right skewness, mild left skewness, or near-normal distributions. With the exception of visit_age which roughly resembles a uniform distribution.  
+**Disclaimer: ** Not all variables are shown, only a subset.  
+
+```{r predictorsDistributions, echo = FALSE}
+
+yank_subset <- df_copd |>
+  select(visit_age, bmi, CigPerDaySmokAvg, SmokStartAge, pct_gastrapping) |>
+  summarise(
+    across(
+      everything(),
+      list(
+        unique  = ~ dplyr::n_distinct(.),
+        missing = ~ sum(is.na(.)),
+        mean    = ~ mean(., na.rm = TRUE),
+        sd      = ~ sd(., na.rm = TRUE),
+        min     = ~ min(., na.rm = TRUE),
+        median  = ~ median(., na.rm = TRUE),
+        max     = ~ max(., na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+yank_long <- yank_subset |>
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", "stat"),
+    # split into 2 regex groups: before "_" and after "_"
+    names_pattern = "^(.*)_(.*)$",
+    values_to = "value"
+  ) |>
+  pivot_wider(
+    names_from  = stat,
+    values_from = value
+  )
+
+yank_long |> pander()
+
+```
+
+### B. Visualizing Predcitors and Response
+
+### 0. Handling Missingness  
+Before preforming any meaningful statistical analysis, it is vital that we first analyse our missing observations and determine their nature. For a more detailed explanation please consult the appendix. In essence because there is a great proportion of missing variables (specifically the response variable) it has been decided that our analysis will be conducted on two data set: one in which we impute missing the missing dependent variable (**complete**) and one where observations with missing dependent variable with not be taken into account (**imputed**).
+
+### i. Transformation of the explanatory variables  
+Based on the scatter plots of predictors vs pct_emphysema most relationships seem to be either non existent, linear, quadratic or $e^{-x}$. At this stage functional relationships cannot be determine but plots give us an idea on what they could be (functional relationships can changed as more variables are included in the model).  
+**Note:** The following plots only represent a subset of variables from the data set.  
+
+```{r explanatoryTransformationPlots2, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 6, fig.height = 8, dpi = 300}
+
+plot_dep_vs_indep <- function(data, dep_col, smooth_method = "loess", print_plots = FALSE) {
+  if (!dep_col %in% names(data)) stop("dep_col must be the name of a column in 'data'.")
+  if (!is.numeric(data[[dep_col]])) stop("Dependent variable must be numeric.")
+  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Package 'ggplot2' is required.")
+
+  plots <- list()
+  y_name <- dep_col
+  
+  for (x_name in names(data)) {
+    if (x_name == dep_col) next
+    
+    x <- data[[x_name]]
+    df <- data[, c(dep_col, x_name)]
+    names(df) <- c("y", "x")
+    df <- df[complete.cases(df), ]
+    if (nrow(df) == 0) next
+    
+    if (is.numeric(x)) {
+      p <- ggplot(df, aes(x = x, y = y)) +
+        geom_point(alpha = 0.6) +
+        geom_smooth(method = smooth_method, se = TRUE) +
+        labs(title = paste(y_name, "vs", x_name),
+             x = x_name, y = y_name) +
+        theme_bw()
+    } else {
+      df$x <- as.factor(df$x)
+      p <- ggplot(df, aes(x = x, y = y)) +
+        geom_boxplot() +
+        labs(title = paste(y_name, "by", x_name),
+             x = x_name, y = y_name) +
+        theme_bw()
+    }
+    plots[[x_name]] <- p
+    if (print_plots) print(p)
+  }
+  return(plots)
+}
+
+# build plots (no printing)
+plotComplete <- complete |> 
+  dplyr::select( pct_emphysema,
+          copd,
+          smoking_status,
+          total_lung_capacity,
+          functional_residual_capacity,
+          pct_gastrapping,
+          exp_meanatt, 
+          FEV1_FVC_ratio, 
+          FEV1_phase2) %>%
+  plot_dep_vs_indep(., "pct_emphysema", print_plots = FALSE)
+
+# remove repeated y-axis labels and shrink text a bit
+plotComplete_clean <- lapply(plotComplete, function(p) {
+  p +
+    labs(y = NULL) +
+    theme(
+      axis.title.y = element_blank(),
+      plot.title   = element_text(size = 8),
+      axis.title.x = element_text(size = 7),
+      axis.text    = element_text(size = 6)
+    )
+})
+
+# arrange all in one multi-panel figure
+wrap_plots(
+  plotComplete_clean,
+  ncol = 4,
+  nrow = 8
+)
+
+```
+
+### ii. Transformation of the response
+
+The output below consists of three plots: A histogram of the distribution of the response variable (percentage of emphysema), a Box-Cox Power Transformation Plot and a histogram of the distribution of the response variable after applying the optimal box cox transformation. For both **complete** and **imputed** data sets the optimal power transformation is $\dfrac{1}{5} = 0.2$
+
+```{r boxcoxTransformation, echo=FALSE, warning=FALSE, message=FALSE, fig.width=3.5, fig.height=3}
+# Build linear models
+testC = lm( pct_emphysema ~ ., data = complete)
+testI = lm( pct_emphysema ~ ., data = imputed)
+
+# Raw Histogram
+
+g11 = complete %>%
+  filter(!is.na(pct_emphysema)) %>%
+  ggplot(aes(x = pct_emphysema)) +
+  geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "lightblue",
+      color = "black"
+  ) +
+  geom_density(color = "blue", linewidth = 1.2) +
+  labs(
+      title = "Hist",
+      x = "pct_emphysema"
+  )
+
+# Boxcox Plot + optimal point
+bC <- boxcox(testC,        # the model
+             plotit = FALSE,
+             lambda = seq(-2, 2, by = 0.1))  # search grid for λ
+oC = bC$x[ which.max(bC$y) ]
+
+# Transformed Histogram
+g12 = imputed %>%
+  filter(!is.na(pct_emphysema)) %>%
+  ggplot(aes(x = pct_emphysema^oC)) +
+  geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "lightblue",
+      color = "black"
+  ) +
+  geom_density(color = "blue", linewidth = 1.2) +
+  labs(
+      title = "Smoothed Histogram of pct_emphysema",
+      x = "pct_emphysema"
+  )
+
+# For imputed data
+# Raw Histogram
+g21 = complete %>%
+  filter(!is.na(pct_emphysema)) %>%
+  ggplot(aes(x = pct_emphysema)) +
+  geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "lightblue",
+      color = "black"
+  ) +
+  geom_density(color = "blue", linewidth = 1.2) +
+  labs(
+      title = "Hist",
+      x = "pct_emphysema"
+  )
+
+# Boxcox Plot + optimal point
+bI <- boxcox(testI,        # the model
+             plotit = FALSE,
+             lambda = seq(-2, 2, by = 0.1))  # search grid for λ
+oI = bI$x[which.max(bI$y)]
+
+# Transformed Histogram
+g22 = imputed %>%
+  filter(!is.na(pct_emphysema)) %>%
+  ggplot(aes(x = pct_emphysema^oI)) +
+  geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "lightblue",
+      color = "black"
+  ) +
+  geom_density(color = "blue", linewidth = 1.2) +
+  labs(
+      title = "Smoothed Histogram of pct_emphysema",
+      x = "pct_emphysema"
+  )
+
+# ------------------------------------------------------------------
+# Extra: make BoxCox ggplots (do NOT change anything above)
+# ------------------------------------------------------------------
+
+g13 <- as.data.frame(bC) %>%
+  ggplot(aes(x, y)) +
+  geom_line() +
+  geom_vline(xintercept = oC, color = "red", linetype = 2) +
+  labs(
+    title = "BoxCox Profile (Complete)",
+    x = "lambda",
+    y = "log-likelihood"
+  )
+
+g23 <- as.data.frame(bI) %>%
+  ggplot(aes(x, y)) +
+  geom_line() +
+  geom_vline(xintercept = oI, color = "red", linetype = 2) +
+  labs(
+    title = "BoxCox Profile (Imputed)",
+    x = "lambda",
+    y = "log-likelihood"
+  )
+
+# ------------------------------------------------------------------
+# Two “grid-arranged” objects of three plots each
+# ------------------------------------------------------------------
+
+# Complete data
+gridC <- (g11 | g13) /
+         g12
+
+# Imputed data
+gridI <- (g21 | g23) /
+         g22
+
+# Display
+gridC
+gridI
+
+# Modify predictor to optimal transformation  
+complete$pct_emphysema = complete$pct_emphysema^(oC)
+imputed$pct_emphysema = imputed$pct_emphysema^(oC)
+
+
+```
+
+## Variable Transformation and Selection
+
+### A. Transformation of the explanatory variables: Part 2
+
+In this variable transformation pipeline, we preserve the raw original data for all variables while adding selected transformations for specific lung-function measures. These include square-root and log transforms for lung capacity variables, quadratic terms for mean attenuation metrics, and both logarithmic and shifted negative-exponential transforms for FEV1 in phase 2, enabling flexible modeling while maintaining the original scale for baseline comparisons.  
+Our best subsets code enforces a mutual exclusivity rule: for variables with multiple transformations (e.g., raw, sqrt, ln), only one version can be chosen per model. This ensures we avoid multicollinearity and select the most useful transformation without redundancy.  
+
+```{r VariableTransformations, echo=FALSE, warning=FALSE, message=FALSE}
+# ---------------------- Variable Transformations ----------------------
+
+# Variables 2 through 23 (visit_age to smoking_status)
+vars_1_to_22 <- names(complete)[2:23]
+
+# Create list-of-lists: each element is list(raw = original_vector)
+variable_list <- lapply(vars_1_to_22, function(v) {
+  list(raw = complete[[v]])
+})
+
+# Name the outer list elements
+names(variable_list) <- vars_1_to_22
+
+
+## New part: lung function variables + difference ----------------------
+
+extra_vars <- c(
+  "total_lung_capacity",
+  "functional_residual_capacity",
+  "pct_gastrapping",
+  "insp_meanatt",
+  "exp_meanatt",
+  "FEV1_FVC_ratio",
+  "FEV1",
+  "FVC",
+  "FEV1_phase2",
+  "difference"
+)
+
+variable_list_extra <- lapply(extra_vars, function(v) {
+  
+  x <- complete[[v]]
+  out <- list(raw = x)  # always include raw
+  
+  # total_lung_capacity & functional_residual_capacity: sqrt and ln
+  if (v %in% c("total_lung_capacity", "functional_residual_capacity")) {
+    out$sqrt <- sqrt(x)
+    out$ln   <- log(x)
+  }
+  
+  # insp_meanatt & exp_meanatt: matrix with raw and x^2
+  if (v %in% c("insp_meanatt", "exp_meanatt")) {
+    out$x2 <- cbind(raw = x, x2 = x^2)
+  }
+  
+  # FEV1_phase2: ln and exp(-x)+1
+  if (v == "FEV1_phase2") {
+    out$ln            <- log(x)
+    out$exp_neg_plus1 <- exp(-x) + 1
+  }
+  
+  # pct_gastrapping, FEV1_FVC_ratio, FEV1, FVC, difference -> raw only
+  
+  out
+})
+
+names(variable_list_extra) <- extra_vars
+
+# Combine main and extra lists
+variable_list <- c(variable_list, variable_list_extra)
+
+
+# ---------------------- Display structure ----------------------
+
+# for (v in names(variable_list)) {
+#   cat("Outer name:", v, "\n")
+#   cat("  Inner names:", paste(names(variable_list[[v]]), collapse = ", "), "\n\n")
+# }
+
+```
+
+### B. Best subset selection + LASSO
+Taking into account that our data only contains around 30 informative predictors for regression, utilizing the power of best subset selection is actually feasible. Our results showed that out of the 30 predictors, only 19 of them where meaningful. Yet, at this stage it is still to early to report those as we first need to check whether there exist multicolinearity in our proposed model. So, we ran LASSO on both sets of data **complete** and **imputed**. Both gave the same conclusions, based on our LASSO we dcided to drop 5 variables (visit_age, gender, race, weight_kg, hr)
+
+```{r VariableTransformationsAndBestSubset, echo=FALSE, warning=FALSE, message=FALSE}
+# ---------------------- User settings ----------------------
+# Name of the response variable in 'complete'
+response_var <- "pct_emphysema"
+
+# ---------------------- Variable Transformations ----------------------
+
+# Variables 2 through 23 (visit_age to smoking_status)
+vars_1_to_22 <- names(complete)[2:23]
+
+# Create list-of-lists: each element is list(raw = original_vector)
+variable_list <- lapply(vars_1_to_22, function(v) {
+  list(raw = complete[[v]])
+})
+
+# Name the outer list elements
+names(variable_list) <- vars_1_to_22
+
+
+## New part: lung function variables + difference ----------------------
+
+extra_vars <- c(
+  "total_lung_capacity",
+  "functional_residual_capacity",
+  "pct_gastrapping",
+  "insp_meanatt",
+  "exp_meanatt",
+  "FEV1_FVC_ratio",
+  "FEV1",
+  "FVC",
+  "FEV1_phase2",
+  "difference"
+)
+
+variable_list_extra <- lapply(extra_vars, function(v) {
+  
+  x <- complete[[v]]
+  out <- list(raw = x)  # always include raw
+  
+  # total_lung_capacity & functional_residual_capacity: sqrt and ln
+  if (v %in% c("total_lung_capacity", "functional_residual_capacity")) {
+    out$sqrt <- sqrt(x)
+    out$ln   <- log(x)
+  }
+  
+  # insp_meanatt & exp_meanatt: matrix with raw and x^2
+  if (v %in% c("insp_meanatt", "exp_meanatt")) {
+    out$x2 <- cbind(raw = x, x2 = x^2)
+  }
+  
+  # FEV1_phase2: ln and exp(-x)+1
+  if (v == "FEV1_phase2") {
+    out$ln            <- log(x)
+    out$exp_neg_plus1 <- exp(-x) + 1
+  }
+  
+  # pct_gastrapping, FEV1_FVC_ratio, FEV1, FVC, difference -> raw only
+  
+  out
+})
+
+names(variable_list_extra) <- extra_vars
+
+# Combine main and extra lists
+variable_list <- c(variable_list, variable_list_extra)
+
+
+# ---------------------- Choose best transform per variable (AIC then BIC) ----------------------
+
+y <- complete[[response_var]]
+
+chosen_blocks <- list()
+tol <- 1e-8  # tiny tolerance for AIC ties
+
+for (v in names(variable_list)) {
+  
+  transforms <- variable_list[[v]]
+  
+  best_aic        <- Inf
+  best_bic        <- Inf
+  best_block      <- NULL
+  best_block_name <- NULL
+  
+  # loop over entries in sublist (raw, sqrt, ln, x2, etc.)
+  for (tr_name in names(transforms)) {
+    
+    Z <- transforms[[tr_name]]
+    
+    # make sure Z is a data.frame (handles vectors and matrices)
+    Z_df <- as.data.frame(Z)
+    
+    # temporary data for fitting
+    tmp <- data.frame(y = y, Z_df)
+    
+    # drop rows with missing values in y or predictors
+    tmp <- tmp[complete.cases(tmp), ]
+    
+    if (nrow(tmp) < 5) next  # skip if too few observations
+    
+    # model: y ~ all columns of this block
+    fit     <- lm(y ~ ., data = tmp)
+    aic_val <- AIC(fit)
+    bic_val <- BIC(fit)
+    
+    # primary: AIC, secondary: BIC
+    if ( (aic_val < best_aic - tol) ||
+         (abs(aic_val - best_aic) <= tol && bic_val < best_bic) ) {
+      best_aic        <- aic_val
+      best_bic        <- bic_val
+      best_block      <- Z_df        # may be 1 or >1 columns
+      best_block_name <- tr_name
+    }
+  }
+  
+  # If best_block is multi-column (e.g. raw + x^2), reduce to ONE column
+  if (!is.null(best_block)) {
+    
+    if (ncol(best_block) > 1) {
+      best_aic_col <- Inf
+      best_bic_col <- Inf
+      best_col     <- NULL
+      best_col_nm  <- NULL
+      
+      for (j in seq_len(ncol(best_block))) {
+        z_col <- best_block[, j]
+        tmp2  <- data.frame(y = y, z = z_col)
+        tmp2  <- tmp2[complete.cases(tmp2), ]
+        if (nrow(tmp2) < 5) next
+        
+        fit2   <- lm(y ~ z, data = tmp2)
+        aic2   <- AIC(fit2)
+        bic2   <- BIC(fit2)
+        
+        if ( (aic2 < best_aic_col - tol) ||
+             (abs(aic2 - best_aic_col) <= tol && bic2 < best_bic_col) ) {
+          best_aic_col <- aic2
+          best_bic_col <- bic2
+          best_col     <- z_col
+          best_col_nm  <- colnames(best_block)[j]
+        }
+      }
+      
+      # overwrite best_block with the single best column
+      best_block <- data.frame(best_col)
+      colnames(best_block) <- best_col_nm
+    }
+    
+    # now best_block has exactly ONE column → one entry per sublist
+    colnames(best_block) <- paste0(v, ".", colnames(best_block))
+    chosen_blocks[[v]] <- best_block
+  }
+}
+
+# Combine chosen blocks into a single design matrix
+X <- do.call(cbind, chosen_blocks)
+
+# Put response + predictors in one data.frame
+model_df <- data.frame(y = y, X)
+model_df <- model_df[complete.cases(model_df), ]
+
+
+# ---------------------- Best subset selection (AIC then BIC) ----------------------
+
+predictor_names <- setdiff(names(model_df), "y")
+
+form <- as.formula(
+  paste("y ~", paste(predictor_names, collapse = " + "))
+)
+
+# nvmax = maximum number of predictors to consider in subset
+nvmax_val <- min(ncol(model_df) - 1, 20)  # cap at 20 for speed; adjust if you like
+
+best_sub <- regsubsets(
+  form,
+  data  = model_df,
+  nbest = 1,
+  nvmax = nvmax_val
+)
+
+best_sum  <- summary(best_sub)
+
+# Compute AIC and BIC for each model directly from RSS and k
+n   <- nrow(model_df)
+rss <- best_sum$rss
+k   <- rowSums(best_sum$which)  # includes intercept
+
+aic_vals <- n * log(rss / n) + 2 * k
+bic_vals <- n * log(rss / n) + log(n) * k
+
+tol_sub <- 1e-8
+
+# First minimize AIC, then BIC as tie-breaker
+min_aic <- min(aic_vals)
+candidates <- which(abs(aic_vals - min_aic) <= tol_sub)
+
+if (length(candidates) == 1) {
+  best_idx <- candidates
+} else {
+  best_idx <- candidates[which.min(bic_vals[candidates])]
+}
+
+best_size <- best_idx  # index of the chosen model
+
+# cat("Best subset size (by AIC, BIC tie-breaker):", best_size, "\n\n")
+# 
+# cat("Selected coefficients:\n")
+# print(coef(best_sub, best_size))
+# 
+# # If you want to see which variables were chosen:
+# selected_coefs <- coef(best_sub, best_size)
+# selected_vars  <- names(selected_coefs)[-1]  # exclude intercept
+# cat("\nSelected predictors:\n")
+# print(selected_vars)
+
+```
+
+```{r VariableTransformationsAndBestSubsetPlot, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 10, fig.height = 3.5}
+# Arrange plots: 1 row, 2 columns
+op <- par(mfrow = c(1, 2),
+          mar   = c(7, 4, 3, 1) + 0.1)
+
+# ---------------------- Variable inclusion plot by AIC ----------------------
+
+which_mat    <- best_sum$which
+which_no_int <- which_mat[, -1, drop = FALSE]
+
+ord      <- order(aic_vals)
+incl_ord <- which_no_int[ord, , drop = FALSE]
+aic_ord  <- aic_vals[ord]
+
+z <- t(incl_ord * 1)
+x <- seq_len(nrow(z))
+y <- aic_ord
+
+image(x, y, z,
+      xlab = "",
+      ylab = "AIC",
+      xaxt = "n",
+      col  = gray.colors(2, start = 1, end = 0))
+
+# CLEAN LABELS: remove everything after the first "."
+clean_labels <- sub("\\..*$", "", colnames(incl_ord))
+
+axis(1, at = x, labels = clean_labels, las = 2, cex.axis = 0.7)
+title("Variable plot AIC")
+
+best_aic_val <- aic_vals[best_size]
+abline(h = best_aic_val, lty = 2, lwd = 2)
+
+# ---------------------- Variable inclusion plot by BIC ----------------------
+
+ord_bic      <- order(bic_vals)
+incl_ord_bic <- which_no_int[ord_bic, , drop = FALSE]
+bic_ord      <- bic_vals[ord_bic]
+
+z_bic  <- t(incl_ord_bic * 1)
+x_bic  <- seq_len(nrow(z_bic))
+y_bic  <- bic_ord
+
+image(x_bic, y_bic, z_bic,
+      xlab = "",
+      ylab = "BIC",
+      xaxt = "n",
+      col  = gray.colors(2, start = 1, end = 0))
+
+# CLEAN LABELS FOR BIC
+clean_labels_bic <- sub("\\..*$", "", colnames(incl_ord_bic))
+
+axis(1, at = x_bic, labels = clean_labels_bic, las = 2, cex.axis = 0.7)
+title("Variable plot BIC")
+
+par(op)
+```
+
+```{r candidateModel, echo=FALSE, warning=FALSE, message=FALSE}
+
+complete_model_t1 = model <- lm( pct_emphysema ~ 
+                                   visit_age + 
+                                   gender + 
+                                   race + 
+                                   weight_kg + 
+                                   hr +
+                                   O2_hours_day + 
+                                   hay_fever + 
+                                   emphysema + 
+                                   copd +
+                                   CigPerDaySmokAvg +
+                                   Duration_Smoking + 
+                                   smoking_status + 
+                                   functional_residual_capacity + 
+                                   pct_gastrapping +
+                                   insp_meanatt + I(insp_meanatt^2) +
+                                   exp_meanatt + I(exp_meanatt^2) + 
+                                   FEV1_FVC_ratio + 
+                                   FVC +
+                                   difference, 
+                                   data = complete)
+
+imputed_model_t1 = model <- lm( pct_emphysema ~ 
+                                   visit_age + 
+                                   gender + 
+                                   race + 
+                                   weight_kg + 
+                                   hr +
+                                   O2_hours_day + 
+                                   hay_fever + 
+                                   emphysema + 
+                                   copd +
+                                   CigPerDaySmokAvg +
+                                   Duration_Smoking + 
+                                   smoking_status + 
+                                   functional_residual_capacity + 
+                                   pct_gastrapping +
+                                   insp_meanatt + I(insp_meanatt^2) +
+                                   exp_meanatt + I(exp_meanatt^2) + 
+                                   FEV1_FVC_ratio + 
+                                   FVC +
+                                   difference, 
+                                   data = imputed)
+
+
+
+```
+
+Given that our ideal choice of lambda (the one that minimizes cross validation error) includes all 19 variables selection from the best subset procedure from previous **code**.  We decided to use $5 = -\ln{\lambda}$ as it is at this point where our coefficients begain to stabilize and our cross validation error does not explode.  
+**Note:** Lasso results were consistent across complete and imputed data; plots shown are from complete data.
+
+```{r LassoComplete, echo=FALSE, warning=FALSE, message=FALSE,  fig.width = 10, fig.height = 3.5}
+# ===============================
+# 1) Get model frame, design matrix & response
+# ===============================
+mf_t1 <- model.frame(complete_model_t1)
+X_t1  <- model.matrix(complete_model_t1, mf_t1)[, -1]  # drop intercept
+y_t1  <- model.response(mf_t1)
+
+# ===============================
+# 2) LASSO with cross-validation (alpha = 1)
+# ===============================
+cvfit_lasso_t1 <- cv.glmnet(X_t1, y_t1, alpha = 1)
+
+p_t1      <- ncol(X_t1)
+coef_min  <- coef(cvfit_lasso_t1, s = "lambda.min")
+coef_1se  <- coef(cvfit_lasso_t1, s = "lambda.1se")
+
+# cat("Total predictors:", p_t1, "\n")
+# cat("Non-zero at lambda.min:",  sum(coef_min[-1, ] != 0), "\n")
+# cat("Non-zero at lambda.1se:",  sum(coef_1se[-1, ] != 0), "\n")
+
+# ===============================
+# 3) COMBINED PLOTS
+# ===============================
+
+op <- par(mfrow = c(1, 2))   # 1 row, 2 columns
+
+## (A) CV curve
+plot(cvfit_lasso_t1)
+title("Cross-Validation Curve for LASSO (t1 model)", line = 2.5)
+
+## (B) Coefficient paths with labels (no distortion)
+x_limits <- c(0, 11)
+y_limits <- c(-0.06, 0.04)
+
+fit <- cvfit_lasso_t1$glmnet.fit
+
+plot(
+  fit,
+  xvar  = "lambda",
+  xlim  = x_limits,
+  ylim  = y_limits,
+  label = TRUE          # <-- add predictor names at path ends
+)
+title("LASSO Coefficient Paths (t1 model)", line = 2.5)
+
+par(op)
+
+# ===============================
+# 4) Variables to drop at chosen lambda
+# ===============================
+log_lambda_target <- 5
+lambda_target     <- exp(-log_lambda_target)
+
+# cat("Using lambda ≈", lambda_target, "\n")
+
+coef_lambda_target <- coef(cvfit_lasso_t1$glmnet.fit, s = lambda_target)
+
+beta_vec  <- as.numeric(coef_lambda_target)[-1]
+var_names <- rownames(coef_lambda_target)[-1]
+
+vars_keep <- var_names[beta_vec != 0]
+vars_drop <- var_names[beta_vec == 0]
+
+# cat("\nVariables to KEEP at lambda ~", lambda_target, ":\n")
+# print(vars_keep)
+# 
+# cat("\nVariables to DROP at lambda ~", lambda_target, ":\n")
+# print(vars_drop)
+
+selection_tbl <- tibble(
+  variable = var_names,
+  coef     = beta_vec,
+  keep     = beta_vec != 0
+)
+```
+
+After preforming LASSO variable selection to reduce multicolinearity, VIF is mostly under control. The only terms the exhibit a high amount of multicolinearity are those quadratic terms.
+
+```{r VIFCheck, echo=FALSE, warning=FALSE, message=FALSE}
+
+complete_model_t2 = model <- lm( pct_emphysema ~ 
+                                   gender +
+                                   race + 
+                                   weight_kg +
+                                   O2_hours_day +
+                                   emphysema + 
+                                   copd +
+                                   CigPerDaySmokAvg +
+                                   smoking_status +
+                                   functional_residual_capacity +
+                                   pct_gastrapping +
+                                   insp_meanatt + I(insp_meanatt^2) + 
+                                   exp_meanatt + I(exp_meanatt^2) + 
+                                   FEV1_FVC_ratio +
+                                   FEV1 + 
+                                   difference,
+                                   data = complete)
+
+
+imputed_model_t2 = model <- lm( pct_emphysema ~ 
+                                   gender +
+                                   race + 
+                                   weight_kg +
+                                   O2_hours_day +
+                                   emphysema + 
+                                   copd +
+                                   CigPerDaySmokAvg +
+                                   smoking_status +
+                                   functional_residual_capacity +
+                                   pct_gastrapping +
+                                   insp_meanatt + I(insp_meanatt^2) + 
+                                   exp_meanatt + I(exp_meanatt^2) + 
+                                   FEV1_FVC_ratio +
+                                   FEV1 + 
+                                   difference,
+                                   data = imputed)
+
+
+vif_complete <- car::vif(complete_model_t2) |>
+  data.frame() |>
+  rownames_to_column("term") |>
+  arrange(desc(GVIF)) |>
+  slice(1:4) |>
+  select(term, GVIF_complete = GVIF)
+
+vif_imputed <- car::vif(imputed_model_t2) |>
+  data.frame() |>
+  rownames_to_column("term") |>
+  select(term, GVIF_imputed = GVIF)
+
+vif_tab <- vif_complete |>
+  left_join(vif_imputed, by = "term")
+
+kbl(vif_tab, digits = 3,
+    caption = "VIF Decreasing for both Datasets") |>
+  kable_styling(
+    full_width = FALSE,
+    latex_options = "hold_position"  # keep table in place
+  )
+
+```
+
+## Statsitical Analysis
+### A. Residual Analysis 
+At this point we have a pretty good idea on what variables should be included in our regression model (including their transformations). Yet, before we can draw any inferences we need to make sure that our model meets the 4 major assumptions of Ordinary Least Squares (Zero Mean, Constant Variance, uncorrelated errors and normality of errors). 
+
+```{r olsAssumptions, echo = FALSE, fig.width=5.2, fig.height=2.3}
+layout(matrix(c(1,2), nrow = 1))  # 1 row, 2 columns
+
+plot(complete_model_t2, which = 1, main = "Complete")
+plot(complete_model_t2, which = 2, main = "Complete")
+
+```
+\newpage
+```{r olsAssumptions2, echo = FALSE, fig.width=5.2, fig.height=2.3}
+layout(matrix(c(1,2), nrow = 1))  # 1 row, 2 columns
+par(oma = c(0,0,0,0), mar = c(4,4,3,1))
+
+plot(imputed_model_t2, which = 1, main = "Imputed")
+plot(imputed_model_t2, which = 2, main = "Imputed")
+```
+
+Although the two plots are constructed from different datasets, they point to the same conclusions. The assumption of constant variance is clearly violated. More notably, the normality assumption is strongly violated. In both tails, the residuals deviate substantially from the theoretical quantiles, showing pronounced departures from normality at both the lower and upper extremes. After further investigation we found the culprit.  
+Both datasets contain imputed values, particularly the **complete** dataset. In many instances we imputed rows with multiple missing entries, sometimes as many as 12. Given the substantial amount of imputation required, it is likely that some of the imputed values were inaccurate, and this may have adversely affected the performance of our linear regression model.  
+Our further analysis analysiszed outliers for both data sets and determined that in both cases all outliers came from imputed data (erroneous observations where more pronunced in the **complete** dataset). Thus said, we felt that it was appropriate to delete these erroneously computed observations. More detail on how we determined "erroneous" observations in the appendix.  
+After deleting those problematic residuals, we refit our model and plot our diagnostic plots. As you can observe in both cases our 2 violated assumptions are almost corrected. Our residuals are now normally distributed and our variance is now more consistent across all ranges of fitted values.  
+
+```{r ResidualAnalysisComplete, echo = FALSE}
+# 1. Extract diagnostics ---------------------------------------------------
+
+complete_lev     <- hatvalues(complete_model_t2)
+complete_dffits  <- dffits(complete_model_t2)
+complete_cooks   <- cooks.distance(complete_model_t2)
+complete_dfbetas <- dfbetas(complete_model_t2)
+
+complete_n <- length(complete_lev)
+complete_p <- length(coef(complete_model_t2))
+
+# 2. Influence dataframe ---------------------------------------------------
+
+complete_influence_df <- data.frame(
+  Observation   = seq_len(complete_n),
+  Leverage      = complete_lev,
+  DFFITS        = complete_dffits,
+  CooksDistance = complete_cooks,
+  complete_dfbetas    # one column per coefficient
+)
+
+# 3. Thresholds ------------------------------------------------------------
+
+complete_lev_threshold     <- 2 * complete_p / complete_n
+complete_dffits_threshold  <- 2 * sqrt(complete_p / complete_n)
+complete_cooks_threshold   <- 4 / complete_n
+complete_dfbetas_threshold <- 2 / sqrt(complete_n)
+
+# 4. DFBETAS violation counts ---------------------------------------------
+
+complete_dfbetas_violation_count <- apply(
+  abs(complete_dfbetas) > complete_dfbetas_threshold,
+  1,
+  sum
+)
+
+# 5. Total violation score -------------------------------------------------
+
+complete_total_violation_score <-
+  (complete_lev > complete_lev_threshold) +
+  (abs(complete_dffits) > complete_dffits_threshold) +
+  (complete_cooks > complete_cooks_threshold) +
+  complete_dfbetas_violation_count
+
+# 6. Final influence dataframe --------------------------------------------
+
+complete_final_df <- cbind(
+  complete_influence_df,
+  DFBETAS_Violation_Count = complete_dfbetas_violation_count,
+  TotalViolations         = complete_total_violation_score
+)
+
+# 7. Identify violators ----------------------------------------------------
+
+complete_violators_df <- subset(complete_final_df, TotalViolations > 0)
+
+# Non-leverage violators (any of the non-leverage rules or DFBETAS) -------
+complete_violators_non_leverage <- complete_final_df %>%
+  filter(
+    abs(DFFITS) > complete_dffits_threshold |
+      CooksDistance > complete_cooks_threshold |
+      DFBETAS_Violation_Count > 0
+  ) %>%
+  arrange(desc(TotalViolations))
+
+# 8. Row indices to remove for the complete model -------------------------
+
+# (adjust threshold here if you want, e.g. >= 8)
+complete_remove_idx <- complete_violators_non_leverage %>%
+  filter(TotalViolations >= 8) %>%
+  pull(Observation)
+
+# 9. Percentage of removed rows that come from imputed data ---------------
+
+complete_is_imputed <- complete_remove_idx %in% which(!complete.cases(df_copd))
+percent_violation_complete <- mean(complete_is_imputed)
+# percent_violation_complete is between 0 and 1
+
+# 10. Refit model without influential observations ------------------------
+
+complete_model_t3 <- complete[-complete_remove_idx, ] %>%
+  lm(
+    pct_emphysema ~ 
+      O2_hours_day + 
+      hay_fever + 
+      emphysema + 
+      copd +
+      CigPerDaySmokAvg +
+      Duration_Smoking + 
+      smoking_status + 
+      functional_residual_capacity + 
+      pct_gastrapping +
+      insp_meanatt + I(insp_meanatt^2) +
+      exp_meanatt + I(exp_meanatt^2) + 
+      FEV1_FVC_ratio + 
+      FVC,
+    data = .
+  )
+
+```
+
+```{r ResidualAnalysisImputed, echo = FALSE}
+options(scipen = 999)
+
+# 1. Extract diagnostics ---------------------------------------------------
+
+imputed_lev     <- hatvalues(imputed_model_t2)
+imputed_dffits  <- dffits(imputed_model_t2)
+imputed_cooks   <- cooks.distance(imputed_model_t2)
+imputed_dfbetas <- dfbetas(imputed_model_t2)
+
+imputed_n <- length(imputed_lev)
+imputed_p <- length(coef(imputed_model_t2))
+
+# 2. Influence dataframe ---------------------------------------------------
+
+imputed_influence_df <- data.frame(
+  Observation   = seq_len(imputed_n),
+  Leverage      = imputed_lev,
+  DFFITS        = imputed_dffits,
+  CooksDistance = imputed_cooks,
+  imputed_dfbetas    # one column per coefficient
+)
+
+# 3. Thresholds ------------------------------------------------------------
+
+imputed_lev_threshold     <- 2 * imputed_p / imputed_n
+imputed_dffits_threshold  <- 2 * sqrt(imputed_p / imputed_n)
+imputed_cooks_threshold   <- 4 / imputed_n
+imputed_dfbetas_threshold <- 2 / sqrt(imputed_n)
+
+# 4. DFBETAS violation counts ---------------------------------------------
+
+imputed_dfbetas_violation_count <- apply(
+  abs(imputed_dfbetas) > imputed_dfbetas_threshold,
+  1,
+  sum
+)
+
+# 5. Total violation score -------------------------------------------------
+
+imputed_total_violation_score <-
+  (imputed_lev > imputed_lev_threshold) +
+  (abs(imputed_dffits) > imputed_dffits_threshold) +
+  (imputed_cooks > imputed_cooks_threshold) +
+  imputed_dfbetas_violation_count
+
+# 6. Final influence dataframe --------------------------------------------
+
+imputed_final_df <- cbind(
+  imputed_influence_df,
+  DFBETAS_Violation_Count = imputed_dfbetas_violation_count,
+  TotalViolations         = imputed_total_violation_score
+)
+
+# 7. Subset: keep only observations with ≥1 violation ----------------------
+
+imputed_violators_df <- subset(imputed_final_df, TotalViolations > 0)
+
+imputed_violators_non_leverage <- imputed_final_df %>%
+  filter(
+    abs(DFFITS) > imputed_dffits_threshold |
+      CooksDistance > imputed_cooks_threshold |
+      DFBETAS_Violation_Count > 0
+  ) %>%
+  arrange(desc(TotalViolations))
+
+# 8. Row indices to remove for the imputed model --------------------------
+
+imputed_remove_idx <- imputed_violators_non_leverage %>%
+  filter(TotalViolations >= 10) %>%
+  pull(Observation)
+
+# 9. Identify which of these correspond to imputed rows in the original ----
+# (indices of rows that were imputed in the original df_copd, restricted to non-missing pct_emphysema)
+imputed_original_idx <- which(!complete.cases(df_copd[!is.na(df_copd$pct_emphysema), ]))
+
+imputed_is_imputed <- imputed_remove_idx %in% imputed_original_idx
+percent_violation_imputed <- mean(imputed_is_imputed)
+# percent_violation_imputed is between 0 and 1
+
+# 10. Refit model without influential observations ------------------------
+
+imputed_model_t3 <- imputed[-imputed_remove_idx, ] %>%
+  slice( -c(4071,4072) )   %>%
+  lm(
+    pct_emphysema ~ 
+      O2_hours_day + 
+      hay_fever + 
+      emphysema + 
+      copd +
+      CigPerDaySmokAvg +
+      Duration_Smoking + 
+      smoking_status + 
+      functional_residual_capacity + 
+      pct_gastrapping +
+      insp_meanatt + I(insp_meanatt^2) +
+      exp_meanatt + I(exp_meanatt^2) + 
+      FEV1_FVC_ratio + 
+      FVC,
+    data = .
+  )
+```
+
+```{r ResidualPlotsCombined, echo = FALSE, fig.width= 8, fig.height= 4.5, warning=FALSE, message=FALSE}
+# Augment model data
+aug_c <- augment(complete_model_t3) %>%
+  mutate(sqrt_std_resid = sqrt(abs(.std.resid)))
+
+aug_i <- augment(imputed_model_t3) %>%
+  mutate(sqrt_std_resid = sqrt(abs(.std.resid)))
+
+## ---------------- Complete data plots ----------------
+
+g_resid_c <- ggplot(aug_c, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0, colour = "red") +
+  labs(
+    title = "Residuals vs Fitted (Complete)",
+    x = "Fitted values",
+    y = "Residuals"
+  )
+
+g_scale_c <- ggplot(aug_c, aes(x = .fitted, y = sqrt_std_resid)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(se = FALSE) +
+  labs(
+    title = "Scale-Location (Complete)",
+    x = "Fitted values",
+    y = expression(sqrt("|standardized residuals|"))
+  )
+
+g_qq_c <- ggplot(aug_c, aes(sample = .std.resid)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(
+    title = "Q-Q Residuals (Complete)",
+    x = "Theoretical Quantiles",
+    y = "Standardized residuals"
+  )
+
+gridResC <- g_resid_c / g_scale_c / g_qq_c
+
+## ---------------- Imputed data plots ----------------
+
+g_resid_i <- ggplot(aug_i, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0, colour = "red") +
+  labs(
+    title = "Residuals vs Fitted (Imputed)",
+    x = "Fitted values",
+    y = "Residuals"
+  )
+
+g_scale_i <- ggplot(aug_i, aes(x = .fitted, y = sqrt_std_resid)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(se = FALSE) +
+  labs(
+    title = "Scale-Location (Imputed)",
+    x = "Fitted values",
+    y = expression(sqrt("|standardized residuals|"))
+  )
+
+g_qq_i <- ggplot(aug_i, aes(sample = .std.resid)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(
+    title = "Q-Q Residuals (Imputed)",
+    x = "Theoretical Quantiles",
+    y = "Standardized residuals"
+  )
+# Complete data: top row = 2 plots, bottom row = 1 wide Q-Q
+gridResC <- (g_resid_c | g_scale_c) /
+            g_qq_c
+
+# Imputed data: same structure
+gridResI <- (g_resid_i | g_scale_i) /
+            g_qq_i
+
+# Side-by-side: complete on the left, imputed on the right
+gridResC | gridResI
+
+```
+
+### B. Model Description, Inference, and Interpretation
+### i. Model Description  
+
+```{r sdfsed, echo = FALSE}
+get_metrics <- function(fit, label) {
+  s <- summary(fit)
+  f <- s$fstatistic
+  
+  tibble(
+    Model       = label,
+    Residual_SD = s$sigma,
+    MSE         = s$sigma^2,
+    R2          = s$r.squared,
+    Adj_R2      = s$adj.r.squared,
+    F_stat      = unname(f["value"]),
+    df1         = unname(f["numdf"]),
+    df2         = unname(f["dendf"]),
+    F_pvalue    = pf(f["value"], f["numdf"], f["dendf"], lower.tail = FALSE),
+    AIC         = AIC(fit)
+  )
+}
+
+DATYFRAKE <- bind_rows(
+  get_metrics(complete_model_t3, "Complete"),
+  get_metrics(imputed_model_t3, "Imputed")
+)
+
+# if you really want a base-R data.frame instead of tibble:
+DATYFRAKE <- as.data.frame(DATYFRAKE)
+
+```
+
+Our final model was chosen through a multi-step procedure. We first identified the predictor set with the lowest AIC, then applied LASSO regularization to remove weak or redundant variables, and finally excluded a small number of observations with erroneous imputations.  
+Both the complete and imputed datasets produced strong models, with $R^2$ values of `r DATYFRAKE[ 1,4]` and `r DATYFRAKE[ 2,4]`, and adjusted $R^2$ values of `r DATYFRAKE[ 1,5]` and `r DATYFRAKE[ 2,5]`, respectively. At $\alpha = 0.05$, both models are statistically significant according to their F-tests, indicating that the predictors collectively explain substantial variance in the outcome even though not all individual predictors are significant.
+
+```{r CompactModelSummary, echo = FALSE, warning = FALSE, message = FALSE}
+
+get_metrics <- function(fit, label) {
+  s <- summary(fit)
+  f <- s$fstatistic
+  
+  tibble(
+    Model       = label,
+    Residual_SD = s$sigma,
+    MSE         = s$sigma^2,
+    R2          = s$r.squared,
+    Adj_R2      = s$adj.r.squared,
+    F_stat      = unname(f["value"]),
+    df1         = unname(f["numdf"]),
+    df2         = unname(f["dendf"]),
+    F_pvalue    = pf(f["value"], f["numdf"], f["dendf"], lower.tail = FALSE),
+    AIC         = AIC(fit)
+  )
+}
+
+metrics_tab <- bind_rows(
+  get_metrics(complete_model_t3, "Complete"),
+  get_metrics(imputed_model_t3, "Imputed")
+)
+
+kbl(
+  metrics_tab,
+  digits = c(0, 3, 3, 3, 3, 1, 0, 0, 3, 1),
+  caption = "Compact Summary of Model Fit Statistics"
+) |>
+  kable_styling(
+    full_width = FALSE,
+    latex_options = "hold_position"
+  )
+
+```
+
+### ii. Model Discription and Interpretation  
+Let X1 denote hours of supplemental oxygen used per day; X2 indicate hay fever; X3 indicate emphysema; X4 indicate COPD; X5 represent average cigarettes smoked per day; X6 the duration of smoking in years; X7 and X8 the smoking status indicators; X9 the functional residual capacity; X10 the percentage of gas trapping; X11 and X12 the inspiratory mean attenuation and its square; X13 and X14 the expiratory mean attenuation and its square; X15 the FEV1/FVC ratio; and X16 the FVC value. Let Y denote the percentage of emphysema. Then the full model is:
+
+```{r modelTable, echo = FALSE}
+# Extract predictor names (exclude response)
+pred_names <- names(complete_model_t3$model)[-1]
+
+# Create index labels
+index_labels <- paste0("x", seq_along(pred_names))
+
+# Create labels like "x1: varname"
+combined <- paste(index_labels, pred_names, sep = ": ")
+
+# ---- Set number of columns to 3 ----
+cols <- 3
+
+# Number of rows required
+rows <- ceiling(length(combined) / cols)
+
+# Pad to fill matrix cleanly
+pad_length <- rows * cols - length(combined)
+combined_padded <- c(combined, rep("", pad_length))
+
+# Create matrix by row
+pred_matrix <- matrix(combined_padded, nrow = rows, byrow = TRUE)
+
+# Render table
+knitr::kable(
+  pred_matrix,
+  align = "l",
+  caption = "Predictor Naming Table (3 Predictors per Column)"
+)
+```
+
+\[ Y = β0 + X1β1 + X2β2 + … + X16β16 + ε \]
+
+Our hypotheses for global inference are the following:  
+$\text{H0 : All } \beta_i = 0$  
+$\text{Ha : At least one } \beta_i \ne 0$  
+$\text{ for i = 1, 2, …, 16. }$  
+
+The table summarizes coefficient estimates for 16 variables using both complete-case (C) and imputed (I) analyses, each paired with 95% confidence intervals. Across variables, the imputed estimates generally track closely with the complete-case results, though some values show modest shifts in magnitude or interval range. Overall, the comparison illustrates how imputing missing data can slightly adjust coefficient estimates while maintaining similar patterns and interpretive conclusions. We did not control for FWER due to the large number of predictors included.  
+
+```{r betaTables, echo = FALSE}
+library(kableExtra)
+
+# ---- Helper to extract beta, lower95, upper95 ----
+extract_coef_info <- function(model) {
+  summ  <- summary(model)
+  coefs <- summ$coefficients
+  
+  # drop intercept
+  coefs <- coefs[!rownames(coefs) %in% "(Intercept)", , drop = FALSE]
+  
+  betas <- coefs[, "Estimate"]
+  se    <- coefs[, "Std. Error"]
+  
+  # 95% CI
+  lower <- betas - 1.96 * se
+  upper <- betas + 1.96 * se
+  
+  data.frame(
+    beta = round(betas, 3),
+    l95  = round(lower, 3),
+    u95  = round(upper, 3),
+    row.names = NULL
+  )
+}
+
+# ---- Extract for both models ----
+df_complete <- extract_coef_info(complete_model_t3)
+df_imputed  <- extract_coef_info(imputed_model_t3)
+
+n <- nrow(df_complete)
+
+# Short, compact data frame
+results_df <- data.frame(
+  i    = 1:n,                 # index for β_i
+  c_b  = df_complete$beta,    # complete β
+  c_l  = df_complete$l95,     # complete lower 95
+  c_u  = df_complete$u95,     # complete upper 95
+  i_b  = df_imputed$beta,     # imputed β
+  i_l  = df_imputed$l95,      # imputed lower 95
+  i_u  = df_imputed$u95       # imputed upper 95
+)
+
+# Single-page, compact LaTeX table
+kbl(
+  results_df,
+  booktabs   = TRUE,
+  align      = "r",
+  col.names  = c("$i$",
+                 "$\\beta_i^{(C)}$", "$L_{95}^{(C)}$", "$U_{95}^{(C)}$",
+                 "$\\beta_i^{(I)}$", "$L_{95}^{(I)}$", "$U_{95}^{(I)}$"),
+  caption    = "Complete-case (C) and imputed (I) coefficient estimates with 95\\% confidence intervals."
+) |>
+  kable_styling(
+    font_size  = 8,          # smaller font to fit on one page
+    full_width = FALSE,
+    position   = "center",
+    latex_options = "hold_position"
+  )
+```
+
+### Conclusion
+
+In summary, our analysis identifies a clear set of health related variables that play the strongest role in predicting the percentage of emphysema present in a patient's lungs. Measures tied directly to respiratory function, such as lung capacity metrics, gas trapping indicators, and attenuation based imaging variables, emerged as the most influential predictors. This aligns with expectations, as these metrics reflect the structural and functional deterioration of lung tissue. Prior diagnoses of COPD and emphysema further strengthened the predictive power of the model, reinforcing the progressive nature of respiratory illness and its measurable impact on lung health.
+
+Smoking behavior, including long term exposure and daily quantity, also contributed meaningfully to the prediction of emphysema percentage. While smoking is widely recognized as a primary cause of emphysema, our regression results confirm that smoking related variables are consistently associated with higher emphysema severity. In contrast, several general health indicators such as BMI, heart rate, and blood pressure were not as impactful as originally hypothesized, suggesting that emphysema severity is driven more by respiratory specific factors than by broader measures of overall health.
+
+As with any statistical study, limitations must be acknowledged. The dataset reflects health measurements at a single point in time, even though emphysema develops progressively. Like mentioned in the introduction linear regression also assumes additive relationships between predictors, which may oversimplify the complex interactions underlying lung deterioration. Additionally, the need to impute missing values in both datasets reduced data quality and led to the deletion of several observations, ultimately making the model less powerful. Nevertheless, linear regression remains valuable in this context because it offers clear interpretability, making it well suited for identifying which variables contribute most strongly to emphysema percentage.
+
+While this study confirms linear regression's utility as a transparent and methodologically sound first step in emphysema research, it also highlights opportunities for methodological advancement. Future investigations should incorporate longitudinal data to model temporal dynamics and employ nonlinear approaches (e.g., generalized additive models, machine learning techniques) to capture the complex interactions inherent in respiratory pathophysiology. These methodological expansions would complement—not invalidate—the foundational relationships identified through linear regression, creating a more comprehensive understanding of emphysema progression.
+
+\newpage
+
+## Refrences  
+1. Mayo Clinic Staff. Emphysema: Symptoms and Causes. Mayo Clinic. https://www.mayoclinic.org/diseases-conditions/emphysema/symptoms-causes/syc-20355555.  
+
+2. Cleveland Clinic Staff. Emphysema: Causes, Symptoms, and Treatment. Cleveland Clinic. https://my.clevelandclinic.org/health/diseases/9370-emphysema.  
+
+3. Hasenstab, K. Lecture Slides on Linear Models, Regression Diagnostics, and Variable Selection. Department of Statistics, [San Diego State University], 2025.  
+
+\newpage
+
+## Appendix
+
+We will start our appendix by describing how our data was preprocessed.  
+
+```{r appendixPreprocess, eval = FALSE}
+# Load Data ---------------------------------------------------------------
+
+# Read the COPD dataset from a CSV file into a data frame
+df_copd = read_csv( "/cloud/project/copd_data.csv" )
+
+
+# Replace -1's with NA's --------------------------------------------------
+
+# For various continuous / numeric variables, recode negative sentinel values
+# (e.g., -1) to NA to represent missingness.
+df_copd = df_copd |>
+  mutate( 
+    # Systolic blood pressure: set negative values to NA
+    sysBP = ifelse( sysBP < 0, NA, sysBP ),
+    # Diastolic blood pressure: set negative values to NA
+    diasBP = ifelse( diasBP < 0, NA, diasBP ), 
+    # Heart rate: set negative values to NA
+    hr = ifelse( hr < 0, NA, hr ), 
+    # Recode hay_fever numeric codes into categorical labels
+    hay_fever = case_when(
+      hay_fever == 0 ~ "No",
+      hay_fever == 1 ~ "Yes",
+      hay_fever == 3 ~ "unknown"
+    ),
+    # Smoking-related variables: convert -1 sentinel to NA
+    SmokStartAge = ifelse( SmokStartAge == -1 , NA, SmokStartAge),
+    CigPerDaySmokAvg = ifelse( CigPerDaySmokAvg == -1, NA, CigPerDaySmokAvg),
+    Duration_Smoking = ifelse( Duration_Smoking == -1, NA, Duration_Smoking),
+    # Lung function / imaging measures: convert -1 sentinel to NA
+    total_lung_capacity = ifelse( total_lung_capacity == -1 , NA, total_lung_capacity),
+    pct_emphysema = ifelse( pct_emphysema == -1 , NA, pct_emphysema),
+    functional_residual_capacity = ifelse( functional_residual_capacity == -1 , NA, functional_residual_capacity),
+    pct_gastrapping = ifelse( pct_gastrapping == -1 , NA, pct_gastrapping),
+    insp_meanatt = ifelse( insp_meanatt == -1, NA, insp_meanatt),
+    exp_meanatt = ifelse( exp_meanatt == -1, NA, exp_meanatt),
+    FEV1_FVC_ratio = ifelse( FEV1_FVC_ratio == -1, NA, FEV1_FVC_ratio),
+    FEV1 = ifelse( FEV1 == -1, NA, FEV1),
+    FVC = ifelse( FVC == -1, NA, FVC)
+  )
+
+
+# Convert categorical "unknown" to NA's -----------------------------------
+
+# For categorical variables, convert the "unknown" (and "missing" for sleep_apnea)
+# categories into NA to treat them as missing.
+df_copd = df_copd |> mutate(
+  asthma = ifelse( asthma == "unknown", NA, asthma),
+  hay_fever = ifelse( hay_fever == "unknown", NA, hay_fever),
+  bronchitis_attack = ifelse( bronchitis_attack == "unknown", NA, bronchitis_attack),
+  pneumonia = ifelse( pneumonia == "unknown", NA, pneumonia),
+  chronic_bronchitis = ifelse( chronic_bronchitis == "unknown", NA, chronic_bronchitis),
+  emphysema = ifelse( emphysema == "unknown", NA, emphysema),
+  copd = ifelse( copd == "unknown", NA, copd),
+  # Sleep apnea: treat both "unknown" and "missing" as NA
+  sleep_apnea = ifelse( (sleep_apnea == "unknown") | (sleep_apnea == "missing") , NA, sleep_apnea)
+)
+
+
+# Convert categorical to binary -------------------------------------------
+
+# Convert Yes/No categorical variables into numeric 0/1 indicators,
+# preserving NA where values are missing.
+df_copd <- df_copd |> 
+  mutate(
+    asthma = case_when(
+      is.na(asthma) ~ NA_real_,  # keep missing as NA
+      asthma == "No" ~ 0,
+      asthma == "Yes" ~ 1
+    ),
+    hay_fever = case_when(
+      is.na(hay_fever) ~ NA_real_,
+      hay_fever == "No" ~ 0,
+      hay_fever == "Yes" ~ 1
+    ),
+    bronchitis_attack = case_when(
+      is.na(bronchitis_attack) ~ NA_real_,
+      bronchitis_attack == "No" ~ 0,
+      bronchitis_attack == "Yes" ~ 1
+    ),
+    pneumonia = case_when(
+      is.na(pneumonia) ~ NA_real_,
+      pneumonia == "No" ~ 0,
+      pneumonia == "Yes" ~ 1
+    ),
+    chronic_bronchitis = case_when(
+      is.na(chronic_bronchitis) ~ NA_real_,
+      chronic_bronchitis == "No" ~ 0,
+      chronic_bronchitis == "Yes" ~ 1
+    ),
+    emphysema = case_when(
+      is.na(emphysema) ~ NA_real_,
+      emphysema == "No" ~ 0,
+      emphysema == "Yes" ~ 1
+    ),
+    copd = case_when(
+      is.na(copd) ~ NA_real_,
+      copd == "No" ~ 0,
+      copd == "Yes" ~ 1
+    ),
+    sleep_apnea = case_when(
+      is.na(sleep_apnea) ~ NA_real_,
+      sleep_apnea == "No" ~ 0,
+      sleep_apnea == "Yes" ~ 1
+    )
+  )
+
+
+# Convert into factors ----------------------------------------------------
+
+# Coerce selected variables to factors for categorical analysis/models.
+df_copd = df_copd |>
+  mutate( 
+    gender = as.factor(gender),
+    race = as.factor(race),
+    asthma = as.factor(asthma),
+    hay_fever = as.factor(hay_fever),
+    bronchitis_attack = as.factor(bronchitis_attack),
+    pneumonia = as.factor(pneumonia),
+    chronic_bronchitis = as.factor(chronic_bronchitis),
+    emphysema = as.factor(emphysema),
+    copd = as.factor(copd),
+    sleep_apnea = as.factor(sleep_apnea),
+    smoking_status = as.factor(smoking_status),
+    gender = as.factor(gender)  # redundant re-coercion of gender to factor
+  )
+
+# Relocate percent of emphysema ------------------------------------------
+
+# Move pct_emphysema column to immediately follow sid in the data frame.
+df_copd = df_copd |>
+  relocate( pct_emphysema, .after = sid )
+
+# Zeros for smoke age and CigPerDaySmokAvg -------------------------------
+
+# For non-smokers ("Never smoked"), set smoking-related measures to 0
+# instead of leaving them as NA or original values.
+df_copd <- df_copd |>
+  mutate(
+    SmokStartAge = if_else(smoking_status == "Never smoked", 0, SmokStartAge),
+    CigPerDaySmokAvg = if_else(smoking_status == "Never smoked", 0, CigPerDaySmokAvg),
+    Duration_Smoking = if_else(smoking_status == "Never smoked", 0, Duration_Smoking)
+  )
+
+```
+
+The subsequent sections of the appendix provide supplementary material, organized to mirror the structure of the main analysis.  
+
+\newpage  
+
+## Explination of variables used  
+
+Below are the original 35 variables as well as their description (not all where used or relevant in the analysis):
+
+• sid: The anonymized patient identification number.  
+• visit_year: The calendar year in which the patient visit occurred.  
+• visit_date: The specific date on which the patient visit occurred.  
+• visit_age: The patient’s age at the time of the visit.  
+• gender: The patient’s reported gender (Male or Female).  
+• race: The patient’s race category (White, Black or African American).  
+• height_cm: The patient’s height measured in centimeters.  
+• weight_kg: The patient’s weight measured in kilograms.  
+• sysBP, diasBP: Systolic and diastolic blood pressure, respectively.  
+• hr: The patient’s heart rate.  
+• O2_hours_day: For a typical 24-hour day, the number of hours of supplemental oxygen used.  
+• bmi: The patient’s body mass index.  
+• asthma: Whether the patient has ever been diagnosed with asthma (Yes, No).  
+• hay_fever: Whether the patient has ever had hay fever (Yes, No).  
+• bronchitis_attack: Whether the patient has ever had a bronchitis attack (Yes, No).  
+• pneumonia: Whether the patient has ever had pneumonia (Yes, No).  
+• chronic_bronchitis: Whether the patient has ever been diagnosed with chronic bronchitis (Yes, No).  
+• emphysema: Whether the patient has ever been diagnosed with emphysema (Yes, No).  
+• copd: Whether the patient has been diagnosed with chronic obstructive pulmonary disease (Yes, No).  
+• sleep_apnea: Whether the patient has ever had sleep apnea (Yes, No).  
+• SmokStartAge: The age at which the patient began cigarette smoking.  
+• CigPerDaySmokAvg: The average number of cigarettes smoked per day across smoking history.  
+• Duration_Smoking: The number of years the patient has smoked.  
+• smoking_status: Categorical indicator of smoking behavior (Never smoked, Former smoker, Current smoker).  
+• total_lung_capacity: The lung volume at full inspiration, measured in liters.  
+• pct_emphysema: The percentage of emphysematous (damaged) lung tissue.  
+• functional_residual_capacity: The volume of air remaining in the lungs at the end of expiration, in liters.  
+• pct_gastrapping: The percentage of air trapping present after exhalation.  
+• insp_meanatt: The average lung density at full inspiration, measured in Hounsfield units.  
+• exp_meanatt: The average lung density at expiration, measured in Hounsfield units.  
+• FEV1_FVC_ratio: The ratio between forced expiratory volume in 1 second (FEV1) and forced vital capacity (FVC).  
+• FEV1: The volume of air forcefully exhaled in 1 second.  
+• FVC: The total exhaled air volume after a full inhalation.  
+• FEV1_phase2: The FEV1 value measured five years later during a follow-up assessment.
+
+\newpage
+
+## Full table summaries and their distributions  
+
+Originally, due to the lack of space in the study and lack of relevance of some variables most variables where excluded from our table summaries and their distributions where not displayed.  
+
+```{r appendixTableSummary, echo = FALSE}
+yank_subset <- df_copd |>
+  summarise(
+    across(
+      everything(),
+      list(
+        unique  = ~ dplyr::n_distinct(., na.rm = TRUE),      # ignore NA in uniqueness count
+        missing = ~ sum(is.na(.)),                           # still counts NA explicitly
+        mean    = ~ if (is.numeric(.)) mean(., na.rm = TRUE) else NA_real_,
+        sd      = ~ if (is.numeric(.)) sd(., na.rm = TRUE) else NA_real_,
+        min     = ~ if (is.numeric(.)) min(., na.rm = TRUE) else NA_real_,
+        median  = ~ if (is.numeric(.)) median(., na.rm = TRUE) else NA_real_,
+        max     = ~ if (is.numeric(.)) max(., na.rm = TRUE) else NA_real_
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+yank_long <- yank_subset |>
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", "stat"),
+    names_pattern = "^(.*)_(.*)$",
+    values_to = "value"
+  ) |>
+  pivot_wider(
+    names_from  = stat,
+    values_from = value
+  )
+
+print( yank_long )
+```
+
+## Histograms and Boxplots  
+
+```{r appendixHistograms}
+# Use df_copd as the dataset
+df_single <- df_copd |>
+  dplyr::select( -sid, -visit_year, -visit_date )
+vars <- names(df_single)
+
+# Ensure pct_emphysema exists
+if (!"pct_emphysema" %in% vars) {
+  stop("pct_emphysema not found in df_copd.")
+}
+
+for (v in vars) {
+
+  cat("\n\n### Plotting:", v, "###\n")
+
+  # --------------------------------------------------------- #
+  #  NUMERIC VARIABLES → HISTOGRAM OF THE VARIABLE ITSELF     #
+  # --------------------------------------------------------- #
+  if (is.numeric(df_single[[v]]) & v != "pct_emphysema") {
+
+    p_hist <- ggplot(df_single, aes(x = .data[[v]])) +
+      geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+      labs(
+        title = paste("Histogram for", v),
+        x = v, y = "Count"
+      ) +
+      theme_bw()
+
+    print(p_hist)
+
+  } else if (!is.numeric(df_single[[v]])) {
+
+    # --------------------------------------------------------- #
+    #  CATEGORICAL VARIABLES → BOXPLOT OF pct_emphysema BY v    #
+    # --------------------------------------------------------- #
+    p_box <- df_single %>%
+      drop_na(.data[[v]], pct_emphysema) %>%
+      ggplot(aes(x = .data[[v]], y = pct_emphysema)) +
+      geom_boxplot(fill = "skyblue", color = "black", outlier.color = "black") +
+      labs(
+        title = paste("pct_emphysema by", v),
+        x = v, y = "pct_emphysema"
+      ) +
+      theme_bw()
+
+    print(p_box)
+  }
+}
+```
+
+
+### A. Cleaning our Data  
+
+The preprocessing steps clean and standardize the COPD dataset by replacing all negative numeric values with missing values (NA) and recoding several categorical variables. Unknown or missing categories in health‐related variables (e.g., asthma, hay fever, COPD, sleep apnea) are converted to NA, and then all Yes/No variables are transformed into binary indicators before being stored as factors. Additional factor conversions are applied to demographic and smoking variables. The dataset is reorganized by moving pct_emphysema next to the subject ID, and a final COPD dataset is created by removing identifier and visit information, leaving only relevant analytic variables.  
+
+## Dealing with Missing Data
+
+Before preforming any meaningful statistical analysis, it is vital that we first analyse our missing observations and determine their nature.  
+For starters, we should note that the following variables have less then 3 missing observations: Systolic blood pressure, Diastolic blood pressure and Heart rate. This minimal missingness is unlikely to meaningfully impact statistical inferences or bias parameter estimates.  
+
+### Missing Respiratory Disease predictors
+
+In previous analysis, it seemed like the predictors the **explained/indicated(change)** whether said patient had that indicated respiratory disease has missing values. However, this is not entirely accurate as in reality those observations marked NA are actually **unknown**. It was ultimately decided to convert those Unknown to NA's and then impute those NA's. This 'unknown' category was not included in the model because, for most variables, it provides little predictive information and would not meaningfully change the results.  
+
+### SmokStartAge, CigPerDaySmokAvg, Duration_Smoking  
+At first glance: SmokStartAge, CigPerDaySmokAvg, Duration_Smoking appear to be missing as 76 observation are labeled as -1, which is impossible based on what our predictors are explaining. However, after further investigation it should be noted that -1 refers to not applicable. If we observed the smoking status variable, we can see that the missingness is explained by the fact that these 76 individuals have never smoked, thus SmokStartAge, CigPerDaySmokAvg, Duration_Smoking does not apply to them. Instead of labeling these observations as NA, it has been decided that instead they will be labeled as 0.  
+
+### Other missing variables
+It should be noted that after further analysis, the rest of the missing data appear to be missing **Completely at random**. Although dataseems to be **missing completely at random**, serval variable are missing together. pct_emphysema, total_lung_capaci and insp_meanatt are missing together likely as a result of tests not being conducted due to either logistical constraints (e.g., unavailability of necessary equipment or specialized personnel) or participant-related factors (unwillingness or inability to undergo the procedure) (likely used the same test to calculate those three variables). The same applies for functional_residual_capacity, exp_meanatt and pct_gastrapping as they are always missing together. Lastly, with only 29 missing observations FEV1_FVC_ratio, FEV1 and FVC are also missing together either due to unwillingness or inability to undergo the procedure (this applied to FEV1 and FVC only, FEV1_FVC_ratio is a ratio of the previous mentioned variables and as a result is missing when the previous variables are also missing).  
+
+### Missing response variable  
+It should be noted that our response variable Percentage of emphysema (damaged lung areas) denoted as pct_emphysema has 1045 missing observations (20% of reponse variables are missing). Unfortunately, dealing with missing response variable is harder then dealing with explanatory variables as the tampering with this response variable will likely have bigger consequences in our analysis of data. Although opinions differ, most sources would tell us that imputing 20% of our response variable is dangerous, therefore our further statistical analysis will be conducted twice: once on a dataset that imputes missing response and once where those observations with missing response variables will not be included.  
+**Note 1:** Data was imputed using the mice package where method = "rf" (Random forest imputations).  
+**Note 2:** In the original code **complete** and **imputed** dataset where downloaded from project files. They where imputed with the same method below, however imuting such large datasets took a long time and it just wan't viable imputing each time we wanted to run our R code.  
+
+```{r appendixImputation, eval = FALSE}
+
+# ---- Helper: build methods vector based on missingness ----
+prepare_methods <- function(df, methods_vector, yvar = "pct_emphysema") {
+  mvec <- methods_vector
+
+  # Do NOT impute Y if it has no missing data
+  if (all(!is.na(df[[yvar]]))) {
+    mvec[yvar] <- ""
+  }
+
+  # Do NOT impute variables with no missingness
+  for (v in names(mvec)) {
+    if (all(!is.na(df[[v]]))) {
+      mvec[v] <- ""
+    }
+  }
+
+  return(mvec)
+}
+
+# Refill cigarites with 0's
+copd = copd |>
+  mutate( SmokStartAge = ifelse( is.na(SmokStartAge), 0 , SmokStartAge),
+          CigPerDaySmokAvg = ifelse( is.na(CigPerDaySmokAvg), 0 , CigPerDaySmokAvg),
+          Duration_Smoking = ifelse( is.na(Duration_Smoking), 0 , Duration_Smoking) )
+
+# Observations 468, 3351 are truely missing and not just 0
+copd[ 486 ,]$"Duration_Smoking" = NA
+copd[ 3351 ,]$"Duration_Smoking" = NA
+
+# Three dataframes: Complete , Imputed and non-missing
+complete = copd
+imputed = copd[ !is.na( copd$pct_emphysema ) , ]
+non_missing = na.omit(copd)
+
+# Preprocess data data. transform pct_emphizyme to logistic
+complete = complete |> 
+  mutate( pct_emphysema = pct_emphysema * (1/100) ) |>
+  mutate( pct_emphysema = log( (pct_emphysema)/(1-pct_emphysema) ) )
+
+
+# ==========================================================
+# 1. COMPLETE → Impute Y and all other missing values
+# ==========================================================
+mice_complete <- mice(
+  complete,
+  method = "rf",
+  m = 6,
+  maxit = 10,
+  seed = 123
+)
+
+# OVERWRITE original complete data frame
+complete <- complete(mice_complete)
+
+# ==========================================================
+# 2. IMPUTED → Y already complete → only impute other vars
+# ==========================================================
+methods_imputed <- prepare_methods(imputed, methods_vector)
+
+mice_imputed <- mice(
+  imputed,
+  method = "rf",
+  m = 6,
+  maxit = 10,
+  seed = 123
+)
+
+# OVERWRITE original imputed data frame
+imputed <- complete(mice_imputed)
+
+
+```
+
+\newapge
+
+## Boxcox justification  
+
+Although the optimal power transformation may seem arbitrary (in many cases it is), it is a useful tool that allows us to stabilize our model in order to conduct inference. In the plots below are a comparison between residual plots and normality plots for transformed and transformed data.  
+
+```{r appendixBoxcox}
+
+complete
+
+```
+
+
+
