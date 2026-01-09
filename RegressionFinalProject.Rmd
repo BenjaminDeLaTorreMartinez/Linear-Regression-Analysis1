@@ -1927,7 +1927,7 @@ imputed <- complete(mice_imputed)
 
 ```
 
-\newapge
+\newpage
 
 ## Boxcox justification  
 
