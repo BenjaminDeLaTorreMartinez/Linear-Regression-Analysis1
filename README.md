@@ -1,4 +1,4 @@
-# Project Title
+# A Statistical Approach to Predicting Emphysema Percentage
 
 ## Overview
 Brief description of the problem, dataset, and objective.
@@ -47,3 +47,15 @@ Planned improvements or extensions.
 
 ## Author & License
 Your name, contact, license
+
+## Data Attribution
+
+The data used in this project originates from:
+- **Source**: [khasenst/datasets_teaching](https://github.com/khasenst/datasets_teaching)
+- **Author**: [@khasenst](https://github.com/khasenst)
+- **License**: Unknown
+
+**Note**: While this repository is publicly accessible on GitHub,
+no explicit open-source license has been specified. The data
+is used here with attribution to the original author for
+educational/academic purposes.
