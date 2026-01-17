@@ -1,7 +1,20 @@
 # A Statistical Approach to Predicting Emphysema Percentage
 
 ## Overview
-Brief description of the problem, dataset, and objective.
+Emphysema is a progressive lung disease that damages alveoli (microscopic air sacs fundamental
+to the respiratory system). While the precise figure is uncertain, an estimated 1.6% of adults had
+a diagnosis of emphysema. This study thus attempts to identify the set of combined factors that
+are most strongly associated with the percentage of emphysema an indiviual has in their lungs.
+After completing analysis through linear regression we can observe that the variables that are most
+correlation with percentage of emphysema are those related to the health of one’s respiratory system.
+More specifically prior diagnoses of copd and emphysema. Additionally, the health related metrics
+included in our model, such as smoking status, average cigarettes smoked per day, smoking duration,
+functional residual capacity, inspiratory and expiratory mean attenuation, gas trapping percentage,
+the FEV1/FVC ratio, and FVC, all contribute meaningful information about a patient’s respiratory
+condition. These variables capture both physiological function and exposure-related effects, helping
+to further explain variation in emphysema percentage beyond prior diagnoses alone. Or in other
+words, the worse an individual’s respiratory health is, the higher the percentage of emphysema
+tends to be.
 
 ## Research Questions / Objectives
 - What are you trying to answer?
