@@ -17,25 +17,26 @@ words, the worse an individual’s respiratory health is, the higher the percent
 tends to be.
 
 ## Research Questions / Objectives
-- What are you trying to answer?
+- Which variables are associated with percentage of emphysema within the lungs?
 - Why does it matter?
 
 ## Dataset
 - Source
-- Time period
-- Size
-- Key variables
+- Time period: Unkown
+- Size: 1.03 MB
+- Key variables: TBD
 - Licensing (if applicable)
 
 ## Methodology
+- EDA
 - Data cleaning steps
+- Data imputation
 - Feature engineering
-- Models or statistical methods used
-- Tools & libraries
+- Linear Regression
+- TBD
 
 ## Results
 - Key findings
-- Visualizations (embed images if possible)
 - Metrics (if any)
 
 ## Repository Structure
